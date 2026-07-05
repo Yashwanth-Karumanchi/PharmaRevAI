@@ -35,6 +35,27 @@ Citations, query details, and a process trace are shown so users can inspect how
 
 ---
 
+## Interacting with Sources, Queries, and Visuals
+
+Every answer is meant to be inspected, not just read. The UI exposes the working behind each response:
+
+**Citations and evidence**
+Claims pulled from FDA labels or document chunks are linked inline to their source. Clicking a citation opens the underlying evidence snippet — the exact passage the answer drew from, along with the document it came from — so a claim can be checked against its origin rather than taken on faith.
+
+**Query drawer**
+For SQL-backed answers, the generated query itself is available to expand and read. This shows exactly which tables, filters, and aggregations produced the numbers in the answer, rather than treating the SQL agent as a black box.
+
+**Process/trace drawer**
+Each answer carries a trace of how it was handled: which route the router chose, which tools from the safe tool registry were invoked, and how the grounding verifier judged the result (supported, limited, or refused). This is the same flow shown in the architecture diagram above, surfaced per-answer.
+
+**Charts and rankings**
+Spending, prescriber cost, and sales-trend questions that return ranked or time-series data are rendered as charts and tables alongside the written answer, not just as raw numbers in prose — useful for questions like "highest Medicare Part D spending" or "spending trend for Keytruda."
+
+**Follow-ups**
+Because the context resolver tracks the previous question, a follow-up like "what about Humira?" is resolved against that prior intent instead of needing to be fully re-specified.
+
+---
+
 ## Example Questions
 
 **Medicare Part D Spending**
@@ -87,13 +108,7 @@ Row counts and previews are read live from Neon/Postgres, so the data coverage p
 
 ## Architecture
 
-```text
-User Question → Conversational Intent Check → Follow-up Context Resolver
-   → Fast Router / LLM Planner → Safe Tool Registry
-   → SQL Agent / RAG Agent / Hybrid Agent / Guardrail Agent
-   → Evidence + Query + Trace Metadata → Answer Composer
-   → Grounding Verifier → Cited Final Answer
-```
+![PharmaRev AI architecture](./docs/architecture.png)
 
 **Router** — classifies each question into SQL-only, RAG-only, hybrid, ambiguous, unsupported, or unrelated.
 **Context Resolver** — handles follow-ups like "what about Humira?"
