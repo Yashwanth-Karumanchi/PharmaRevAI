@@ -1,7 +1,5 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
-
 # dependencies
-/node_modules
+node_modules
 /.pnp
 .pnp.*
 .yarn/*
@@ -10,32 +8,53 @@
 !.yarn/releases
 !.yarn/versions
 
-# testing
-/coverage
+# next
+.next
+out
+build
 
-# next.js
-/.next/
-/out/
+# env
+.env
+.env.local
+.env.*.local
 
-# production
-/build
+# vercel
+.vercel
 
-# misc
-.DS_Store
-*.pem
-
-# debug
+# logs
+*.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
-.env*
-
-# vercel
-.vercel
-
-# typescript
+# OS / editor
+.DS_Store
+Thumbs.db
+*.pem
 *.tsbuildinfo
 next-env.d.ts
+
+# local data / ingestion / maintenance
+scripts
+data
+database
+backups
+
+# generated evaluation workspace
+evaluation
+
+# keep clean public evaluation summaries instead
+!docs/
+!docs/evaluation/
+!docs/evaluation/*.md
+
+# local agent scratch docs
+AGENTS.md
+CLAUDE.md
+
+# patch/generated folders
+*.zip
+pharmarev_*_files
+pharmarev_*_fixes
+pharmarev_milestone*
