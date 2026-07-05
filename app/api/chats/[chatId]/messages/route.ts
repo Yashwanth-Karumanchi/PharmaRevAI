@@ -6,6 +6,12 @@ import { resolveConversationQuestion } from "@/lib/agents/conversationContextRes
 import { formatMessage } from "@/lib/chat/formatters";
 import { maybeAnswerConversationally } from "@/lib/agents/conversationalAssistant";
 
+function toDatabaseJson(value: unknown): Parameters<typeof sql.json>[0] {
+  return JSON.parse(JSON.stringify(value ?? {})) as Parameters<
+    typeof sql.json
+  >[0];
+}
+
 type RouteParams = {
   params: Promise<{ chatId: string }>;
 };
@@ -179,7 +185,7 @@ export async function POST(request: Request, { params }: RouteParams) {
           ${chatId},
           'assistant',
           ${conversationalResponse.answer},
-          ${sql.json(conversationalResponse.metadata)}
+          ${sql.json(toDatabaseJson(conversationalResponse.metadata))}
         )
         returning id, role, content, metadata, created_at
       `;
@@ -206,7 +212,7 @@ export async function POST(request: Request, { params }: RouteParams) {
         ${chatId},
         'assistant',
         ${assistantResponse.content},
-        ${sql.json(assistantResponse.metadata)}
+        ${sql.json(toDatabaseJson(assistantResponse.metadata))}
       )
       returning id, role, content, metadata, created_at
     `;
