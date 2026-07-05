@@ -1,23 +1,28 @@
+# env
 .env
 .env.local
 .env.*.local
 
+# build outputs
 node_modules
 .next
 out
 build
 
-scripts
-data
-database
-evaluation
-backups
+# root-level local-only folders only
+/scripts
+/data
+/database
+/evaluation
+/backups
 
-AGENTS.md
-CLAUDE.md
+# local scratch docs
+/AGENTS.md
+/CLAUDE.md
 
+# generated junk
 *.zip
 *.log
-pharmarev_*_files
-pharmarev_*_fixes
-pharmarev_milestone*
+/pharmarev_*_files
+/pharmarev_*_fixes
+/pharmarev_milestone*
