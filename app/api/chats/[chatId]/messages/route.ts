@@ -6,18 +6,22 @@ import { resolveConversationQuestion } from "@/lib/agents/conversationContextRes
 import { formatMessage } from "@/lib/chat/formatters";
 import { maybeAnswerConversationally } from "@/lib/agents/conversationalAssistant";
 
-function toDatabaseJson(value: unknown): Parameters<typeof sql.json>[0] {
-  return JSON.parse(JSON.stringify(value ?? {})) as Parameters<
-    typeof sql.json
-  >[0];
-}
-
 type RouteParams = {
   params: Promise<{ chatId: string }>;
 };
 
-type RouterResult = Awaited<ReturnType<typeof routeQuestion>>;
-type ToolResult = Awaited<ReturnType<typeof executeRegisteredTool>>;
+type DbChatMessage = {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  metadata: Record<string, unknown> | null;
+  created_at: string;
+};
+
+type ChatSessionRow = {
+  id: string;
+  title: string;
+};
 
 type RecentMessageRow = {
   id: string;
@@ -26,6 +30,15 @@ type RecentMessageRow = {
   metadata: Record<string, unknown> | null;
   created_at: string;
 };
+
+type RouterResult = Awaited<ReturnType<typeof routeQuestion>>;
+type ToolResult = Awaited<ReturnType<typeof executeRegisteredTool>>;
+
+function toDatabaseJson(value: unknown): Parameters<typeof sql.json>[0] {
+  return JSON.parse(JSON.stringify(value ?? {})) as Parameters<
+    typeof sql.json
+  >[0];
+}
 
 function buildChatTitle(firstUserMessage: string) {
   if (firstUserMessage.length <= 38) {
@@ -77,7 +90,12 @@ function buildSharedMetadata({
 
 async function loadRecentMessages(chatId: string) {
   const rows = await sql<RecentMessageRow[]>`
-    select id, role, content, metadata, created_at::text
+    select
+      id,
+      role,
+      content,
+      metadata,
+      created_at::text as created_at
     from chat_messages
     where chat_session_id = ${chatId}
     order by created_at desc
@@ -92,7 +110,6 @@ async function loadRecentMessages(chatId: string) {
     createdAt: row.created_at,
   }));
 }
-
 
 async function buildAssistantResponse({
   originalQuestion,
@@ -136,7 +153,15 @@ export async function POST(request: Request, { params }: RouteParams) {
   try {
     const { chatId } = await params;
     const body = await request.json();
-    const content = typeof body.content === "string" ? body.content.trim() : "";
+
+    const rawContent =
+      typeof body.content === "string"
+        ? body.content
+        : typeof body.message === "string"
+          ? body.message
+          : "";
+
+    const content = rawContent.trim();
 
     if (!content) {
       return NextResponse.json(
@@ -145,7 +170,7 @@ export async function POST(request: Request, { params }: RouteParams) {
       );
     }
 
-    const chatRows = await sql`
+    const chatRows = await sql<ChatSessionRow[]>`
       select id, title
       from chat_sessions
       where id = ${chatId}
@@ -161,7 +186,7 @@ export async function POST(request: Request, { params }: RouteParams) {
 
     const userRows = await sql<DbChatMessage[]>`
       insert into chat_messages (
-        chat_id,
+        chat_session_id,
         role,
         content,
         metadata
@@ -169,10 +194,15 @@ export async function POST(request: Request, { params }: RouteParams) {
       values (
         ${chatId},
         'user',
-        ${body.message},
+        ${content},
         ${sql.json(toDatabaseJson({}))}
       )
-      returning id, role, content, metadata, created_at
+      returning
+        id,
+        role,
+        content,
+        metadata,
+        created_at::text as created_at
     `;
 
     if (chatRows[0].title === "New chat") {
@@ -190,14 +220,24 @@ export async function POST(request: Request, { params }: RouteParams) {
 
     if (conversationalResponse) {
       const assistantRows = await sql<DbChatMessage[]>`
-        insert into chat_messages (chat_session_id, role, content, metadata)
+        insert into chat_messages (
+          chat_session_id,
+          role,
+          content,
+          metadata
+        )
         values (
           ${chatId},
           'assistant',
           ${conversationalResponse.answer},
           ${sql.json(toDatabaseJson(conversationalResponse.metadata))}
         )
-        returning id, role, content, metadata, created_at
+        returning
+          id,
+          role,
+          content,
+          metadata,
+          created_at::text as created_at
       `;
 
       await sql`
@@ -211,20 +251,31 @@ export async function POST(request: Request, { params }: RouteParams) {
         assistantMessage: formatMessage(assistantRows[0]),
       });
     }
+
     const assistantResponse = await buildAssistantResponse({
       originalQuestion: content,
       recentMessages,
     });
 
     const assistantRows = await sql<DbChatMessage[]>`
-      insert into chat_messages (chat_session_id, role, content, metadata)
+      insert into chat_messages (
+        chat_session_id,
+        role,
+        content,
+        metadata
+      )
       values (
         ${chatId},
         'assistant',
         ${assistantResponse.content},
         ${sql.json(toDatabaseJson(assistantResponse.metadata))}
       )
-      returning id, role, content, metadata, created_at
+      returning
+        id,
+        role,
+        content,
+        metadata,
+        created_at::text as created_at
     `;
 
     await sql`
