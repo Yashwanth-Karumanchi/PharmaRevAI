@@ -1,12 +1,20 @@
 import { NextResponse } from "next/server";
 import { sql } from "@/lib/db/client";
-import { formatChatSummary } from "@/lib/chat/formatters";
+import { formatChat, formatChatSummary } from "@/lib/chat/formatters";
 
 type DbChatSession = {
   id: string;
   title: string;
   created_at: string;
   updated_at: string;
+};
+
+type DbChatMessage = {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  metadata: Record<string, unknown> | null;
+  created_at: string;
 };
 
 function buildTitle(value: unknown) {
@@ -67,7 +75,7 @@ export async function POST(request: Request) {
     `;
 
     return NextResponse.json({
-      chat: formatChatSummary(chats[0]),
+      chat: formatChat(chats[0], [] as DbChatMessage[]),
     });
   } catch (error) {
     const message =
