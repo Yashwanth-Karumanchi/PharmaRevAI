@@ -1,36 +1,36 @@
 import { NextResponse } from "next/server";
 import { sql } from "@/lib/db/client";
-import { formatChat, formatChatSummary } from "@/lib/chat/formatters";
+import { formatChatSummary } from "@/lib/chat/formatters";
 
-export async function GET(request: Request) {
+type DbChatSession = {
+  id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+};
+
+function buildTitle(value: unknown) {
+  const title = typeof value === "string" ? value.trim() : "";
+
+  if (!title) {
+    return "New chat";
+  }
+
+  return title.length <= 60 ? title : `${title.slice(0, 60)}...`;
+}
+
+export async function GET() {
   try {
-    const { searchParams } = new URL(request.url);
-    const anonymousUserKey = searchParams.get("anonymousUserKey");
-
-    if (!anonymousUserKey) {
-      return NextResponse.json(
-        { error: "anonymousUserKey is required" },
-        { status: 400 }
-      );
-    }
-
-    const users = await sql`
-      select id
-      from anonymous_users
-      where anonymous_key = ${anonymousUserKey}
-      limit 1
-    `;
-
-    if (users.length === 0) {
-      return NextResponse.json({ chats: [] });
-    }
-
-    const chats = await sql`
-      select id, title, created_at, updated_at
+    const chats = await sql<DbChatSession[]>`
+      select
+        id,
+        title,
+        created_at::text as created_at,
+        updated_at::text as updated_at
       from chat_sessions
-      where anonymous_user_id = ${users[0].id}
-        and deleted_at is null
+      where deleted_at is null
       order by updated_at desc
+      limit 100
     `;
 
     return NextResponse.json({
@@ -38,7 +38,7 @@ export async function GET(request: Request) {
     });
   } catch (error) {
     const message =
-      error instanceof Error ? error.message : "Unknown server error";
+      error instanceof Error ? error.message : "Unknown chats route error";
 
     return NextResponse.json({ error: message }, { status: 500 });
   }
@@ -46,46 +46,54 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json();
-    const anonymousUserKey = body.anonymousUserKey;
+    let body: { title?: unknown } = {};
 
-    if (!anonymousUserKey || typeof anonymousUserKey !== "string") {
-      return NextResponse.json(
-        { error: "anonymousUserKey is required" },
-        { status: 400 }
-      );
+    try {
+      body = (await request.json()) as { title?: unknown };
+    } catch {
+      body = {};
     }
 
-    const users = await sql`
-      insert into anonymous_users (anonymous_key)
-      values (${anonymousUserKey})
-      on conflict (anonymous_key)
-      do update set last_seen_at = now()
-      returning id
-    `;
+    const title = buildTitle(body.title);
 
-    const chatRows = await sql`
-      insert into chat_sessions (anonymous_user_id, title)
-      values (${users[0].id}, 'New chat')
-      returning id, title, created_at, updated_at
-    `;
-
-    const messageRows = await sql`
-      insert into chat_messages (chat_session_id, role, content)
-      values (
-        ${chatRows[0].id},
-        'assistant',
-        'New chat started. Ask a pharma intelligence question using real public data.'
-      )
-      returning id, role, content, created_at
+    const chats = await sql<DbChatSession[]>`
+      insert into chat_sessions (title)
+      values (${title})
+      returning
+        id,
+        title,
+        created_at::text as created_at,
+        updated_at::text as updated_at
     `;
 
     return NextResponse.json({
-      chat: formatChat(chatRows[0], messageRows),
+      chat: formatChatSummary(chats[0]),
     });
   } catch (error) {
     const message =
-      error instanceof Error ? error.message : "Unknown server error";
+      error instanceof Error ? error.message : "Unknown chat create error";
+
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}
+
+export async function DELETE() {
+  try {
+    const rows = await sql<{ id: string }[]>`
+      update chat_sessions
+      set deleted_at = now(),
+          updated_at = now()
+      where deleted_at is null
+      returning id
+    `;
+
+    return NextResponse.json({
+      ok: true,
+      deletedCount: rows.length,
+    });
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Unknown chats delete error";
 
     return NextResponse.json({ error: message }, { status: 500 });
   }

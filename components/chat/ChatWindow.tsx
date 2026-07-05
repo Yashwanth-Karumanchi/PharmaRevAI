@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useEffect, useRef, useState } from "react";
@@ -34,6 +33,12 @@ type ChatWindowProps = {
 };
 
 type FeedbackRating = "helpful" | "not_helpful";
+type CitationType = "sql" | "kb" | "limit";
+
+type CitationChip = {
+  label: string;
+  type?: CitationType;
+};
 
 export function ChatWindow({
   messages,
@@ -50,13 +55,19 @@ export function ChatWindow({
     Record<string, FeedbackRating>
   >({});
 
-  const visibleMessages = messages.filter((message) => !isWelcomeMessage(message));
+  const visibleMessages = messages.filter(
+    (message) => !isWelcomeMessage(message)
+  );
+
   const shouldShowPromptCards = !visibleMessages.some(
     (message) => message.role === "user"
   );
+
   const latestEvidenceMessage = [...visibleMessages]
     .reverse()
-    .find((message) => message.role === "assistant" && hasAnswerArtifacts(message));
+    .find(
+      (message) => message.role === "assistant" && hasAnswerArtifacts(message)
+    );
 
   useEffect(() => {
     scrollToLatestMessage("smooth");
@@ -376,7 +387,7 @@ function CitationChips({
   );
 }
 
-function getCitationLabels(message: Message) {
+function getCitationLabels(message: Message): CitationChip[] {
   const sources = message.metadata?.sources;
 
   if (!Array.isArray(sources)) {
@@ -385,18 +396,25 @@ function getCitationLabels(message: Message) {
 
   return sources
     .filter(isRecord)
-    .map((source) => ({
-      label:
-        typeof source.citationLabel === "string" ? source.citationLabel : "",
-      type:
-        source.citationType === "sql" ||
-        source.citationType === "kb" ||
-        source.citationType === "limit"
-          ? source.citationType
-          : undefined,
-    }))
-    .filter((citation) => citation.label)
+    .map((source): CitationChip => {
+      const label =
+        typeof source.citationLabel === "string" ? source.citationLabel : "";
+
+      return {
+        label,
+        type: normalizeCitationType(source.citationType),
+      };
+    })
+    .filter((citation) => citation.label.length > 0)
     .slice(0, 8);
+}
+
+function normalizeCitationType(value: unknown): CitationType | undefined {
+  if (value === "sql" || value === "kb" || value === "limit") {
+    return value;
+  }
+
+  return undefined;
 }
 
 function getSavedFeedbackRating(message: Message): FeedbackRating | undefined {
@@ -413,7 +431,7 @@ function getSavedFeedbackRating(message: Message): FeedbackRating | undefined {
   return undefined;
 }
 
-function getCitationClassName(type?: "sql" | "kb" | "limit") {
+function getCitationClassName(type?: CitationType) {
   if (type === "sql") {
     return "bg-blue-400/15 text-blue-300";
   }

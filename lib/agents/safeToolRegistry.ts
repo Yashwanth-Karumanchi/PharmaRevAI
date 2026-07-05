@@ -802,7 +802,7 @@ async function normalizeAgentResult({
   question: string;
   registry: SafeToolRegistryTrace;
   router?: unknown;
-}): RegisteredToolResult {
+}): Promise<RegisteredToolResult> {
   const definition = safeToolDefinitions[registry.executedToolName];
 
   const fallbackRoute =

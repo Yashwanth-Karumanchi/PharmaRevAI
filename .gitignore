@@ -58,3 +58,5 @@ next-env.d.ts
 /pharmarev_*_files
 /pharmarev_*_fixes
 /pharmarev_milestone*
+
+.envvercel

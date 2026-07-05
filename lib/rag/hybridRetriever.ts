@@ -531,7 +531,7 @@ async function retrieveVectorRows({
   targetEmbeddingModel: string;
 }) {
   const queryEmbedding = await embedText(question, { inputType: "query" });
-  const queryVector = toPgVector(queryEmbedding);
+  const queryVector = toPgVector(queryEmbedding.embedding);
 
   const rows = await sql<DbChunkRow[]>`
     select
