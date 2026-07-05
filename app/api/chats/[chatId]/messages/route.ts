@@ -159,9 +159,19 @@ export async function POST(request: Request, { params }: RouteParams) {
 
     const recentMessages = await loadRecentMessages(chatId);
 
-    const userRows = await sql`
-      insert into chat_messages (chat_session_id, role, content, metadata)
-      values (${chatId}, 'user', ${content}, ${sql.json({})})
+    const userRows = await sql<DbChatMessage[]>`
+      insert into chat_messages (
+        chat_id,
+        role,
+        content,
+        metadata
+      )
+      values (
+        ${chatId},
+        'user',
+        ${body.message},
+        ${sql.json(toDatabaseJson({}))}
+      )
       returning id, role, content, metadata, created_at
     `;
 
@@ -179,7 +189,7 @@ export async function POST(request: Request, { params }: RouteParams) {
     });
 
     if (conversationalResponse) {
-      const assistantRows = await sql`
+      const assistantRows = await sql<DbChatMessage[]>`
         insert into chat_messages (chat_session_id, role, content, metadata)
         values (
           ${chatId},
@@ -206,7 +216,7 @@ export async function POST(request: Request, { params }: RouteParams) {
       recentMessages,
     });
 
-    const assistantRows = await sql`
+    const assistantRows = await sql<DbChatMessage[]>`
       insert into chat_messages (chat_session_id, role, content, metadata)
       values (
         ${chatId},
