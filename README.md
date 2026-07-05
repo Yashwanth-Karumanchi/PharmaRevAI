@@ -108,7 +108,7 @@ Row counts and previews are read live from Neon/Postgres, so the data coverage p
 
 ## Architecture
 
-![PharmaRev AI architecture](./docs/architecture.png)
+![PharmaRev AI architecture](docs\architecture.png)
 
 **Router** — classifies each question into SQL-only, RAG-only, hybrid, ambiguous, unsupported, or unrelated.
 **Context Resolver** — handles follow-ups like "what about Humira?"
