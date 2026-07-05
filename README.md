@@ -28,7 +28,7 @@ PharmaRev AI answers natural-language questions about loaded public pharma datas
 
 - **SQL** for exact numbers and rankings
 - **RAG** for FDA label and document evidence
-- **Hybrid SQL + RAG** for questions needing both data and explanation
+- **Hybrid SQL + RAG** for questions that need both data and explanation
 - **Guardrail/refusal** path for private or unsupported claims
 
 Citations, query details, and a process trace are shown so users can inspect how each answer was produced.
@@ -40,19 +40,19 @@ Citations, query details, and a process trace are shown so users can inspect how
 Every answer is meant to be inspected, not just read. The UI exposes the working behind each response:
 
 **Citations and evidence**
-Claims pulled from FDA labels or document chunks are linked inline to their source. Clicking a citation opens the underlying evidence snippet — the exact passage the answer drew from, along with the document it came from — so a claim can be checked against its origin rather than taken on faith.
+Claims pulled from FDA labels or document chunks are linked inline to their source. Click a citation and it opens the underlying evidence snippet, the exact passage the answer drew from, along with the document it came from. That way a claim can be checked against its origin instead of taken on faith.
 
 **Query drawer**
-For SQL-backed answers, the generated query itself is available to expand and read. This shows exactly which tables, filters, and aggregations produced the numbers in the answer, rather than treating the SQL agent as a black box.
+For SQL-backed answers, the generated query itself is available to expand and read. This shows exactly which tables, filters, and aggregations produced the numbers in the answer, instead of treating the SQL agent like a black box.
 
 **Process/trace drawer**
-Each answer carries a trace of how it was handled: which route the router chose, which tools from the safe tool registry were invoked, and how the grounding verifier judged the result (supported, limited, or refused). This is the same flow shown in the architecture diagram above, surfaced per-answer.
+Each answer carries a trace of how it was handled: which route the router picked, which tools from the safe tool registry got called, and how the grounding verifier judged the result (supported, limited, or refused). It's the same flow shown in the architecture diagram above, just surfaced per answer.
 
 **Charts and rankings**
-Spending, prescriber cost, and sales-trend questions that return ranked or time-series data are rendered as charts and tables alongside the written answer, not just as raw numbers in prose — useful for questions like "highest Medicare Part D spending" or "spending trend for Keytruda."
+Spending, prescriber cost, and sales-trend questions that return ranked or time-series data get rendered as charts and tables next to the written answer, not just as raw numbers in prose. Useful for things like "highest Medicare Part D spending" or "spending trend for Keytruda."
 
 **Follow-ups**
-Because the context resolver tracks the previous question, a follow-up like "what about Humira?" is resolved against that prior intent instead of needing to be fully re-specified.
+Since the context resolver tracks the previous question, a follow-up like "what about Humira?" gets resolved against that prior intent instead of needing to be fully re-specified.
 
 ---
 
@@ -85,7 +85,7 @@ Because the context resolver tracks the previous question, a follow-up like "wha
 - Which sales rep lost the most private pharma deals?
 - What was the rebate-adjusted net revenue for this drug?
 
-These aren't in the loaded public datasets, so the assistant explains the limitation instead of hallucinating.
+None of that is in the loaded public datasets, so the assistant explains the limitation instead of hallucinating.
 
 ---
 
@@ -108,16 +108,16 @@ Row counts and previews are read live from Neon/Postgres, so the data coverage p
 
 ## Architecture
 
-![PharmaRev AI architecture](docs\architecture.png)
+![PharmaRev AI architecture](docs/architecture.png)
 
-**Router** — classifies each question into SQL-only, RAG-only, hybrid, ambiguous, unsupported, or unrelated.
-**Context Resolver** — handles follow-ups like "what about Humira?"
-**Safe Tool Registry** — only allows registered public-data tools to run.
-**SQL Agents** — answer exact numeric questions from structured tables.
-**RAG Retrieval** — retrieves FDA label and public evidence chunks via local embeddings.
-**Answer Composer** — improves wording while preserving citations and evidence boundaries.
-**Grounding Verifier** — checks whether the answer is supported, limited, or should be refused.
-**Answer Flow UI** — shows how the question moved through router, tools, evidence, composer, verifier, and final answer.
+**Router**: classifies each question into SQL-only, RAG-only, hybrid, ambiguous, unsupported, or unrelated.
+**Context Resolver**: handles follow-ups like "what about Humira?"
+**Safe Tool Registry**: only allows registered public-data tools to run.
+**SQL Agents**: answer exact numeric questions from structured tables.
+**RAG Retrieval**: retrieves FDA label and public evidence chunks via local embeddings.
+**Answer Composer**: improves wording while preserving citations and evidence boundaries.
+**Grounding Verifier**: checks whether the answer is supported, limited, or should be refused.
+**Answer Flow UI**: shows how the question moved through router, tools, evidence, composer, verifier, and final answer.
 
 ---
 
@@ -137,7 +137,7 @@ Evaluated on 1,000 questions across SQL, RAG, hybrid, ambiguous, private-unanswe
 | Avg Latency              | 174.86 ms |
 | P95 Latency              |    408 ms |
 
-**By Category:** SQL Only 72% · RAG Only 92% · Hybrid 92.5% · Private Unanswerable 100% · Ambiguous 80% · Unrelated Firewall 100%
+**By Category:** SQL Only 72%, RAG Only 92%, Hybrid 92.5%, Private Unanswerable 100%, Ambiguous 80%, Unrelated Firewall 100%
 
 ---
 
@@ -155,7 +155,7 @@ Evaluated on 1,000 questions across SQL, RAG, hybrid, ambiguous, private-unanswe
 
 ## Limitations
 
-PharmaRev AI only answers from loaded public datasets. It cannot infer private revenue, rebates, contract terms, CRM opportunities, sales-rep performance, internal margins, or year-over-year trends beyond 2024. When a question needs unavailable data, the assistant says so clearly.
+PharmaRev AI only answers from loaded public datasets. It can't infer private revenue, rebates, contract terms, CRM opportunities, sales-rep performance, internal margins, or year-over-year trends beyond 2024. When a question needs data that isn't available, the assistant just says so.
 
 ---
 
