@@ -108,7 +108,7 @@ Row counts and previews are read live from Neon/Postgres, so the data coverage p
 
 ## Architecture
 
-<img src="docs/architecture.png" alt="Architecture diagram" height="800" width="600"/>
+<img src="docs/architecture.png" alt="Architecture diagram" height="600" width="400"/>
 
 **Router**: classifies each question into SQL-only, RAG-only, hybrid, ambiguous, unsupported, or unrelated.
 **Context Resolver**: handles follow-ups like "what about Humira?"
