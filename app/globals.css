@@ -1,3 +1,4 @@
+
 @import "tailwindcss";
 
 :root {
@@ -19,8 +20,182 @@
   }
 }
 
-body {
+* {
+  box-sizing: border-box;
+}
+
+html {
   background: var(--background);
+}
+
+body {
+  background: radial-gradient(circle at top, rgba(16, 185, 129, 0.08), transparent 34%),
+    var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+}
+
+button,
+a {
+  outline-color: rgba(52, 211, 153, 0.7);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.4);
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.28);
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.44);
+}
+
+.markdownMessage {
+  width: 100%;
+  line-height: 1.62;
+  font-size: 14px;
+  color: inherit;
+  overflow-wrap: anywhere;
+}
+
+.markdownMessage > *:first-child {
+  margin-top: 0;
+}
+
+.markdownMessage > *:last-child {
+  margin-bottom: 0;
+}
+
+.markdownMessage p {
+  margin: 0 0 12px;
+}
+
+.markdownMessage strong {
+  font-weight: 700;
+  color: rgba(248, 250, 252, 0.98);
+}
+
+.markdownMessage em {
+  font-style: italic;
+}
+
+.markdownMessage h1,
+.markdownMessage h2,
+.markdownMessage h3 {
+  margin: 14px 0 8px;
+  font-weight: 700;
+  color: rgba(248, 250, 252, 0.98);
+}
+
+.markdownMessage h1 {
+  font-size: 18px;
+}
+
+.markdownMessage h2 {
+  font-size: 16px;
+}
+
+.markdownMessage h3 {
+  font-size: 15px;
+}
+
+.markdownMessage ul,
+.markdownMessage ol {
+  margin: 8px 0 12px;
+  padding-left: 22px;
+}
+
+.markdownMessage li {
+  margin: 4px 0;
+}
+
+.markdownTableWrap {
+  width: 100%;
+  overflow-x: auto;
+  margin: 12px 0 16px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 14px;
+  background: rgba(2, 6, 23, 0.26);
+}
+
+.markdownMessage table {
+  width: 100%;
+  min-width: 680px;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.markdownMessage thead {
+  background: rgba(148, 163, 184, 0.12);
+}
+
+.markdownMessage th,
+.markdownMessage td {
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+  text-align: left;
+  vertical-align: top;
+}
+
+.markdownMessage th {
+  font-weight: 700;
+  white-space: nowrap;
+  color: rgba(226, 232, 240, 0.98);
+}
+
+.markdownMessage td {
+  white-space: normal;
+  color: rgba(203, 213, 225, 0.96);
+}
+
+.markdownMessage tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.markdownMessage code.inlineCode {
+  padding: 2px 5px;
+  border-radius: 6px;
+  background: rgba(148, 163, 184, 0.16);
+  font-size: 13px;
+}
+
+.markdownCodeBlock {
+  overflow-x: auto;
+  padding: 12px;
+  margin: 12px 0;
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+.markdownCodeBlock code {
+  font-size: 13px;
+  white-space: pre;
+}
+
+.markdownMessage blockquote {
+  margin: 12px 0;
+  padding: 8px 12px;
+  border-left: 3px solid rgba(52, 211, 153, 0.55);
+  background: rgba(52, 211, 153, 0.07);
+  border-radius: 8px;
+}
+
+.markdownMessage a {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.markdownMessage hr {
+  border: none;
+  border-top: 1px solid rgba(148, 163, 184, 0.2);
+  margin: 16px 0;
 }
