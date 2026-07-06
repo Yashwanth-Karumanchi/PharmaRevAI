@@ -3,6 +3,29 @@ import { planWithLlmSemantics } from "./llmSemanticPlanner";
 
 export type QueryRouteDecision = FastIntentRoute;
 
+type SemanticSafetyDecision = {
+  category:
+    | "public_pharma_analytics"
+    | "specific_fda_label_question"
+    | "medical_treatment_recommendation"
+    | "private_or_internal_data_request"
+    | "unrelated_or_other";
+  confidence: "Low" | "Medium" | "High";
+  reason: string;
+};
+
+type GeminiCandidate = {
+  content?: {
+    parts?: Array<{
+      text?: string;
+    }>;
+  };
+};
+
+type GeminiResponse = {
+  candidates?: GeminiCandidate[];
+};
+
 function clean(value: unknown) {
   return String(value ?? "").replace(/\s+/g, " ").trim();
 }
@@ -38,157 +61,216 @@ function makeFallbackRoute(
   };
 }
 
-const knownLoadedDrugTerms = [
-  "anoro",
-  "anoro ellipta",
-  "adempas",
-  "arexvy",
-  "trelegy",
-  "trelegy ellipta",
-  "breo",
-  "breo ellipta",
-  "advair",
-  "advair diskus",
-  "spiriva",
-  "symbicort",
-  "eliquis",
-  "januvia",
-  "ozempic",
-  "trulicity",
-  "humira",
-  "stelara",
-  "dupixent",
-  "keytruda",
-  "ibrance",
-  "farxiga",
-  "jardiance",
-  "allopurinol",
-];
+function getGeminiKey() {
+  const key = process.env.GEMINI_API_KEY;
 
-function hasKnownLoadedDrug(text: string) {
-  return includesAny(text, knownLoadedDrugTerms);
-}
-
-function asksForMedicalRecommendationWithoutDrug(questionInput: unknown) {
-  const question = clean(questionInput);
-  const text = normalize(question);
-
-  if (!text) {
-    return false;
+  if (!key || !key.trim() || key.includes("your_")) {
+    return null;
   }
 
-  if (hasKnownLoadedDrug(text)) {
-    return false;
-  }
-
-  const recommendationSubjects = [
-    "drug",
-    "drugs",
-    "medicine",
-    "medicines",
-    "medication",
-    "medications",
-    "treatment",
-    "treatments",
-    "therapy",
-    "therapies",
-    "tablet",
-    "tablets",
-    "pill",
-    "pills",
-  ];
-
-  const recommendationVerbs = [
-    "help",
-    "helps",
-    "treat",
-    "treats",
-    "cure",
-    "cures",
-    "work",
-    "works",
-    "use",
-    "used",
-    "take",
-    "recommend",
-    "recommended",
-    "best",
-    "good",
-    "better",
-  ];
-
-  const conditionPhrases = [
-    "for",
-    "with",
-    "against",
-    "in",
-    "during",
-    "if i have",
-    "if someone has",
-    "patient has",
-    "patients with",
-  ];
-
-  const hasRecommendationSubject = includesAny(text, recommendationSubjects);
-  const hasRecommendationVerb = includesAny(text, recommendationVerbs);
-  const hasConditionPhrase = includesAny(text, conditionPhrases);
-
-  const asksWhichDrug =
-    /\b(which|what|best|good)\s+(drug|drugs|medicine|medicines|medication|medications|treatment|treatments|therapy|therapies|tablet|tablets|pill|pills)\b/.test(
-      text
-    );
-
-  const asksDrugForCondition =
-    /\b(drug|drugs|medicine|medicines|medication|medications|treatment|treatments|therapy|therapies|tablet|tablets|pill|pills)\b.*\b(for|with|against)\b/.test(
-      text
-    );
-
-  const asksHelpForCondition =
-    /\b(help|helps|treat|treats|cure|cures|work|works|take|use|used)\b.*\b(for|with|against)\b/.test(
-      text
-    );
-
-  const asksRecommendation =
-    asksWhichDrug ||
-    asksDrugForCondition ||
-    asksHelpForCondition ||
-    (hasRecommendationSubject && hasRecommendationVerb && hasConditionPhrase);
-
-  const isSpecificLabelQuestion = includesAny(text, [
-    "fda label",
-    "according to the label",
-    "label says",
-    "label mention",
-    "label mentions",
-    "does the label",
-    "warning",
-    "warnings",
-    "contraindication",
-    "contraindications",
-    "adverse",
-    "side effect",
-    "side effects",
-  ]);
-
-  return asksRecommendation && !isSpecificLabelQuestion;
+  return key.trim();
 }
 
-function medicalRecommendationLimitationRoute(
-  questionInput: unknown
-): QueryRouteDecision {
+function getSafetyModelName() {
+  return (
+    process.env.MEDICAL_SAFETY_ROUTER_MODEL ||
+    process.env.LLM_PLANNER_MODEL ||
+    process.env.GEMINI_MODEL ||
+    "gemini-3.1-flash-lite"
+  );
+}
+
+function extractJson(text: string) {
+  const cleaned = text
+    .replace(/```json/gi, "")
+    .replace(/```/g, "")
+    .trim();
+
+  const firstBrace = cleaned.indexOf("{");
+  const lastBrace = cleaned.lastIndexOf("}");
+
+  if (firstBrace === -1 || lastBrace === -1 || lastBrace <= firstBrace) {
+    throw new Error("No JSON object found.");
+  }
+
+  return cleaned.slice(firstBrace, lastBrace + 1);
+}
+
+function parseSemanticSafetyDecision(
+  text: string
+): SemanticSafetyDecision | null {
+  try {
+    const json = JSON.parse(extractJson(text)) as Partial<SemanticSafetyDecision>;
+
+    const validCategories = new Set([
+      "public_pharma_analytics",
+      "specific_fda_label_question",
+      "medical_treatment_recommendation",
+      "private_or_internal_data_request",
+      "unrelated_or_other",
+    ]);
+
+    const validConfidences = new Set(["Low", "Medium", "High"]);
+
+    if (!json.category || !validCategories.has(json.category)) {
+      return null;
+    }
+
+    const confidence = validConfidences.has(json.confidence || "")
+      ? json.confidence
+      : "Medium";
+
+    return {
+      category: json.category,
+      confidence: confidence as SemanticSafetyDecision["confidence"],
+      reason: clean(json.reason) || "Semantic safety router decision.",
+    };
+  } catch {
+    return null;
+  }
+}
+
+function buildSemanticSafetyPrompt(question: string) {
+  return [
+    "You are a semantic safety router for PharmaRev AI.",
+    "",
+    "Classify the user question by meaning, not by keyword matching.",
+    "",
+    "PharmaRev AI can answer public pharma data questions about:",
+    "- Medicare Part D spending",
+    "- CMS Part D prescriber costs",
+    "- CMS Open Payments",
+    "- public pharma sales trends",
+    "- FDA label evidence for a specific drug or label topic",
+    "",
+    "PharmaRev AI must not recommend drugs, treatments, medicines, or therapies for a medical condition.",
+    "It may summarize loaded FDA label evidence for a specific drug, but it must not tell a user what drug they should take or what drug helps a condition.",
+    "",
+    "Categories:",
+    "1. public_pharma_analytics: the user asks for rankings, costs, spending, claims, payments, sales, manufacturers, datasets, or public pharma analytics.",
+    "2. specific_fda_label_question: the user asks what an FDA label says about a specific drug, warning, indication, adverse event, dosage, or label section.",
+    "3. medical_treatment_recommendation: the user asks which drug, medicine, treatment, or therapy helps/treats a condition, or asks what they should take.",
+    "4. private_or_internal_data_request: the user asks for private revenue, rebates, contracts, CRM, sales-rep performance, margins, discounts, or internal business data.",
+    "5. unrelated_or_other: anything else.",
+    "",
+    "Important examples:",
+    "- 'Which drugs had the highest Medicare Part D spending in 2024?' is public_pharma_analytics.",
+    "- 'What is Eliquis used for according to the FDA label?' is specific_fda_label_question.",
+    "- 'Which drug helps for jaundice?' is medical_treatment_recommendation.",
+    "- 'Which sales rep lost the most private pharma deals?' is private_or_internal_data_request.",
+    "",
+    "Return only valid JSON with this shape:",
+    JSON.stringify({
+      category: "public_pharma_analytics",
+      confidence: "High",
+      reason: "short reason",
+    }),
+    "",
+    "User question:",
+    question,
+  ].join("\n");
+}
+
+async function classifySemanticSafety(
+  question: string
+): Promise<SemanticSafetyDecision | null> {
+  const apiKey = getGeminiKey();
+
+  if (!apiKey) {
+    return null;
+  }
+
+  const model = getSafetyModelName();
+  const prompt = buildSemanticSafetyPrompt(question);
+
+  try {
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
+        model
+      )}:generateContent?key=${encodeURIComponent(apiKey)}`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          contents: [
+            {
+              role: "user",
+              parts: [{ text: prompt }],
+            },
+          ],
+          generationConfig: {
+            temperature: 0,
+            maxOutputTokens: 220,
+            responseMimeType: "application/json",
+          },
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const data = (await response.json()) as GeminiResponse;
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+
+    if (!text) {
+      return null;
+    }
+
+    return parseSemanticSafetyDecision(text);
+  } catch {
+    return null;
+  }
+}
+
+function medicalRecommendationLimitationRoute({
+  question,
+  reason,
+  confidence,
+}: {
+  question: string;
+  reason: string;
+  confidence: "Low" | "Medium" | "High";
+}): QueryRouteDecision {
   return makeFallbackRoute({
     toolName: "data_limitation_agent",
     route: "DATA_LIMITATION",
-    intent: "medical_recommendation_without_specific_loaded_drug",
-    confidence: "High",
+    intent: "medical_treatment_recommendation",
+    confidence,
     extractedEntities: {
-      originalQuestion: clean(questionInput),
-      limitationType: "medical_recommendation",
-      requiresSpecificDrug: true,
-      canAnswerSpecificLabelQuestion: true,
+      originalQuestion: clean(question),
+      limitationType: "medical_treatment_recommendation",
+      semanticSafetyReason: reason,
     },
     reason:
-      "The user asked for a drug/treatment recommendation without naming a specific loaded drug. Route to limitation instead of retrieving a random FDA label match.",
+      "Semantic safety router classified the question as a medical treatment recommendation, so it should not retrieve a random FDA label match.",
+  });
+}
+
+function privateDataLimitationRoute({
+  question,
+  reason,
+  confidence,
+}: {
+  question: string;
+  reason: string;
+  confidence: "Low" | "Medium" | "High";
+}): QueryRouteDecision {
+  return makeFallbackRoute({
+    toolName: "data_limitation_agent",
+    route: "DATA_LIMITATION",
+    intent: "private_or_internal_data_request",
+    confidence,
+    extractedEntities: {
+      originalQuestion: clean(question),
+      limitationType: "private_or_internal_data",
+      semanticSafetyReason: reason,
+    },
+    reason:
+      "Semantic safety router classified the question as private/internal data.",
   });
 }
 
@@ -220,7 +302,26 @@ function chooseSqlFallbackTool(text: string): QueryRouteDecision["toolName"] {
     return "part_d_prescriber_agent";
   }
 
-  if (includesAny(text, ["increase", "growth", "grew", "change"])) {
+  if (
+    includesAny(text, [
+      "increase",
+      "growth",
+      "grew",
+      "change",
+      "trend",
+      "trending",
+      "over the years",
+      "over years",
+      "over time",
+      "year over year",
+      "yearly",
+      "historical",
+      "history",
+      "across years",
+      "by year",
+      "all years",
+    ])
+  ) {
     return "part_d_spending_increase_agent";
   }
 
@@ -249,10 +350,6 @@ function chooseSqlFallbackTool(text: string): QueryRouteDecision["toolName"] {
 function fallbackRouteQuestion(questionInput: unknown): QueryRouteDecision {
   const question = clean(questionInput);
   const text = normalize(question);
-
-  if (asksForMedicalRecommendationWithoutDrug(question)) {
-    return medicalRecommendationLimitationRoute(question);
-  }
 
   if (
     includesAny(text, [
@@ -307,6 +404,16 @@ function fallbackRouteQuestion(questionInput: unknown): QueryRouteDecision {
     "a lot",
     "trend",
     "trending",
+    "over the years",
+    "over years",
+    "over time",
+    "year over year",
+    "yearly",
+    "historical",
+    "history",
+    "across years",
+    "by year",
+    "all years",
     "prescriber",
     "provider",
     "specialty",
@@ -370,23 +477,57 @@ function fallbackRouteQuestion(questionInput: unknown): QueryRouteDecision {
 export async function routeQuestion(
   question: string
 ): Promise<QueryRouteDecision> {
-  if (asksForMedicalRecommendationWithoutDrug(question)) {
-    return medicalRecommendationLimitationRoute(question);
+  const semanticSafety = await classifySemanticSafety(question);
+
+  if (semanticSafety?.category === "medical_treatment_recommendation") {
+    return medicalRecommendationLimitationRoute({
+      question,
+      reason: semanticSafety.reason,
+      confidence: semanticSafety.confidence,
+    });
+  }
+
+  if (semanticSafety?.category === "private_or_internal_data_request") {
+    return privateDataLimitationRoute({
+      question,
+      reason: semanticSafety.reason,
+      confidence: semanticSafety.confidence,
+    });
   }
 
   const fastRoute = tryFastIntentRoute(question);
 
   if (fastRoute) {
-    return fastRoute;
+    return {
+      ...fastRoute,
+      extractedEntities: {
+        ...fastRoute.extractedEntities,
+        semanticSafety,
+      },
+    };
   }
 
   const llmRoute = await planWithLlmSemantics(question);
 
   if (llmRoute) {
-    return llmRoute;
+    return {
+      ...llmRoute,
+      extractedEntities: {
+        ...llmRoute.extractedEntities,
+        semanticSafety,
+      },
+    };
   }
 
-  return fallbackRouteQuestion(question);
+  const fallbackRoute = fallbackRouteQuestion(question);
+
+  return {
+    ...fallbackRoute,
+    extractedEntities: {
+      ...fallbackRoute.extractedEntities,
+      semanticSafety,
+    },
+  };
 }
 
 export async function routeQuery(question: string): Promise<QueryRouteDecision> {
