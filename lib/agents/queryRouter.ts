@@ -38,16 +38,185 @@ function makeFallbackRoute(
   };
 }
 
+const knownLoadedDrugTerms = [
+  "anoro",
+  "anoro ellipta",
+  "adempas",
+  "arexvy",
+  "trelegy",
+  "trelegy ellipta",
+  "breo",
+  "breo ellipta",
+  "advair",
+  "advair diskus",
+  "spiriva",
+  "symbicort",
+  "eliquis",
+  "januvia",
+  "ozempic",
+  "trulicity",
+  "humira",
+  "stelara",
+  "dupixent",
+  "keytruda",
+  "ibrance",
+  "farxiga",
+  "jardiance",
+  "allopurinol",
+];
+
+function hasKnownLoadedDrug(text: string) {
+  return includesAny(text, knownLoadedDrugTerms);
+}
+
+function asksForMedicalRecommendationWithoutDrug(questionInput: unknown) {
+  const question = clean(questionInput);
+  const text = normalize(question);
+
+  if (!text) {
+    return false;
+  }
+
+  if (hasKnownLoadedDrug(text)) {
+    return false;
+  }
+
+  const recommendationSubjects = [
+    "drug",
+    "drugs",
+    "medicine",
+    "medicines",
+    "medication",
+    "medications",
+    "treatment",
+    "treatments",
+    "therapy",
+    "therapies",
+    "tablet",
+    "tablets",
+    "pill",
+    "pills",
+  ];
+
+  const recommendationVerbs = [
+    "help",
+    "helps",
+    "treat",
+    "treats",
+    "cure",
+    "cures",
+    "work",
+    "works",
+    "use",
+    "used",
+    "take",
+    "recommend",
+    "recommended",
+    "best",
+    "good",
+    "better",
+  ];
+
+  const conditionPhrases = [
+    "for",
+    "with",
+    "against",
+    "in",
+    "during",
+    "if i have",
+    "if someone has",
+    "patient has",
+    "patients with",
+  ];
+
+  const hasRecommendationSubject = includesAny(text, recommendationSubjects);
+  const hasRecommendationVerb = includesAny(text, recommendationVerbs);
+  const hasConditionPhrase = includesAny(text, conditionPhrases);
+
+  const asksWhichDrug =
+    /\b(which|what|best|good)\s+(drug|drugs|medicine|medicines|medication|medications|treatment|treatments|therapy|therapies|tablet|tablets|pill|pills)\b/.test(
+      text
+    );
+
+  const asksDrugForCondition =
+    /\b(drug|drugs|medicine|medicines|medication|medications|treatment|treatments|therapy|therapies|tablet|tablets|pill|pills)\b.*\b(for|with|against)\b/.test(
+      text
+    );
+
+  const asksHelpForCondition =
+    /\b(help|helps|treat|treats|cure|cures|work|works|take|use|used)\b.*\b(for|with|against)\b/.test(
+      text
+    );
+
+  const asksRecommendation =
+    asksWhichDrug ||
+    asksDrugForCondition ||
+    asksHelpForCondition ||
+    (hasRecommendationSubject && hasRecommendationVerb && hasConditionPhrase);
+
+  const isSpecificLabelQuestion = includesAny(text, [
+    "fda label",
+    "according to the label",
+    "label says",
+    "label mention",
+    "label mentions",
+    "does the label",
+    "warning",
+    "warnings",
+    "contraindication",
+    "contraindications",
+    "adverse",
+    "side effect",
+    "side effects",
+  ]);
+
+  return asksRecommendation && !isSpecificLabelQuestion;
+}
+
+function medicalRecommendationLimitationRoute(
+  questionInput: unknown
+): QueryRouteDecision {
+  return makeFallbackRoute({
+    toolName: "data_limitation_agent",
+    route: "DATA_LIMITATION",
+    intent: "medical_recommendation_without_specific_loaded_drug",
+    confidence: "High",
+    extractedEntities: {
+      originalQuestion: clean(questionInput),
+      limitationType: "medical_recommendation",
+      requiresSpecificDrug: true,
+      canAnswerSpecificLabelQuestion: true,
+    },
+    reason:
+      "The user asked for a drug/treatment recommendation without naming a specific loaded drug. Route to limitation instead of retrieving a random FDA label match.",
+  });
+}
+
 function chooseSqlFallbackTool(text: string): QueryRouteDecision["toolName"] {
   if (includesAny(text, ["open payments", "payments", "physician payment"])) {
     return "open_payments_agent";
   }
 
-  if (includesAny(text, ["sales quantity", "quantity sold", "sales trend", "atc"])) {
+  if (
+    includesAny(text, [
+      "sales quantity",
+      "quantity sold",
+      "sales trend",
+      "atc",
+    ])
+  ) {
     return "pharma_sales_agent";
   }
 
-  if (includesAny(text, ["prescriber", "provider", "specialty", "state", "where"])) {
+  if (
+    includesAny(text, [
+      "prescriber",
+      "provider",
+      "specialty",
+      "state",
+      "where",
+    ])
+  ) {
     return "part_d_prescriber_agent";
   }
 
@@ -80,6 +249,10 @@ function chooseSqlFallbackTool(text: string): QueryRouteDecision["toolName"] {
 function fallbackRouteQuestion(questionInput: unknown): QueryRouteDecision {
   const question = clean(questionInput);
   const text = normalize(question);
+
+  if (asksForMedicalRecommendationWithoutDrug(question)) {
+    return medicalRecommendationLimitationRoute(question);
+  }
 
   if (
     includesAny(text, [
@@ -157,7 +330,8 @@ function fallbackRouteQuestion(questionInput: unknown): QueryRouteDecision {
         needsSqlEvidence: true,
         needsLabelEvidence: true,
       },
-      reason: "Fallback hybrid route detected SQL/public-data intent plus FDA-label intent.",
+      reason:
+        "Fallback hybrid route detected SQL/public-data intent plus FDA-label intent.",
     });
   }
 
@@ -193,7 +367,13 @@ function fallbackRouteQuestion(questionInput: unknown): QueryRouteDecision {
   });
 }
 
-export async function routeQuestion(question: string): Promise<QueryRouteDecision> {
+export async function routeQuestion(
+  question: string
+): Promise<QueryRouteDecision> {
+  if (asksForMedicalRecommendationWithoutDrug(question)) {
+    return medicalRecommendationLimitationRoute(question);
+  }
+
   const fastRoute = tryFastIntentRoute(question);
 
   if (fastRoute) {

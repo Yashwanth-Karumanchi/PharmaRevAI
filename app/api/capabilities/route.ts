@@ -39,7 +39,7 @@ function buildPromptCards({
   sampleDrug: string | null;
 }): PromptCard[] {
   const latestYear = [...availableYears].sort((a, b) => b - a)[0] ?? 2024;
-  const exampleDrug = sampleDrug || "Eliquis";
+  const exampleDrug = sampleDrug || "Humira";
 
   return [
     {

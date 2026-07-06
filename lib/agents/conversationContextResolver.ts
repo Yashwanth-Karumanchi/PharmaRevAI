@@ -1,256 +1,266 @@
-import { resolveDrugEntity, normalizePharmaText, containsAnyNormalized } from "./pharmaEntityResolver";
-
 type ChatMessageLike = {
-  role?: string;
-  content?: string;
+  id?: string;
+  role: string;
+  content: string;
   metadata?: Record<string, unknown> | null;
+  createdAt?: string;
 };
 
-export type ConversationResolution = {
-  originalQuestion: string;
+type ConversationContextResult = {
   resolvedQuestion: string;
   wasFollowUp: boolean;
-  method: "none" | "deterministic_context_rewrite";
+  method: string;
   reason: string;
   contextSource?: {
-    previousUserQuestion?: string;
-    previousAssistantRoute?: string;
-    previousAssistantToolName?: string;
+    messageId?: string;
+    role?: string;
+    content?: string;
   };
+};
+
+type LlmFollowUpDecision = {
+  isFollowUp: boolean;
+  resolvedQuestion: string;
+  reason: string;
+  contextMessageIndex?: number | null;
+};
+
+type GeminiCandidate = {
+  content?: {
+    parts?: Array<{
+      text?: string;
+    }>;
+  };
+};
+
+type GeminiResponse = {
+  candidates?: GeminiCandidate[];
 };
 
 function clean(value: unknown) {
   return String(value ?? "").replace(/\s+/g, " ").trim();
 }
 
-function getMetadataString(metadata: Record<string, unknown> | null | undefined, key: string) {
-  const value = metadata?.[key];
-  return typeof value === "string" ? value : "";
-}
-
-function isWelcomeMessage(message: ChatMessageLike) {
+function getModelName() {
   return (
-    message.role === "assistant" &&
-    clean(message.content).toLowerCase().startsWith("new chat started")
+    process.env.CONVERSATION_RESOLVER_MODEL ||
+    process.env.LLM_PLANNER_MODEL ||
+    process.env.GEMINI_MODEL ||
+    "gemini-3.1-flash-lite"
   );
 }
 
-function usableMessages(messages: ChatMessageLike[]) {
-  return messages
-    .filter((message) => !isWelcomeMessage(message))
-    .filter((message) => clean(message.content));
+function getGeminiKey() {
+  const key = process.env.GEMINI_API_KEY;
+
+  if (!key || !key.trim() || key.includes("your_")) {
+    return null;
+  }
+
+  return key.trim();
 }
 
-function getPreviousUserQuestion({
-  messages,
-  currentQuestion,
-}: {
-  messages: ChatMessageLike[];
-  currentQuestion: string;
-}) {
-  const normalizedCurrent = normalizePharmaText(currentQuestion);
-  const userMessages = usableMessages(messages).filter((message) => message.role === "user");
+function recentConversationForPrompt(messages: ChatMessageLike[]) {
+  return messages
+    .slice(-8)
+    .map((message, index) => {
+      const metadata = message.metadata || {};
+      const resolvedQuestion =
+        typeof metadata.resolvedQuestion === "string"
+          ? metadata.resolvedQuestion
+          : null;
 
-  for (let index = userMessages.length - 1; index >= 0; index -= 1) {
-    const content = clean(userMessages[index].content);
+      return {
+        index,
+        id: message.id ?? null,
+        role: message.role,
+        content: clean(message.content),
+        resolvedQuestion,
+      };
+    })
+    .filter((message) => message.content.length > 0);
+}
 
-    if (!content) continue;
+function extractJson(text: string) {
+  const cleaned = text
+    .replace(/```json/gi, "")
+    .replace(/```/g, "")
+    .trim();
 
-    if (normalizePharmaText(content) === normalizedCurrent) {
-      continue;
+  const firstBrace = cleaned.indexOf("{");
+  const lastBrace = cleaned.lastIndexOf("}");
+
+  if (firstBrace === -1 || lastBrace === -1 || lastBrace <= firstBrace) {
+    throw new Error("No JSON object found in resolver response.");
+  }
+
+  return cleaned.slice(firstBrace, lastBrace + 1);
+}
+
+function parseLlmDecision(text: string): LlmFollowUpDecision | null {
+  try {
+    const json = JSON.parse(extractJson(text)) as Partial<LlmFollowUpDecision>;
+
+    if (typeof json.isFollowUp !== "boolean") {
+      return null;
     }
 
-    return content;
+    const resolvedQuestion = clean(json.resolvedQuestion);
+    const reason = clean(json.reason);
+
+    if (!resolvedQuestion) {
+      return null;
+    }
+
+    return {
+      isFollowUp: json.isFollowUp,
+      resolvedQuestion,
+      reason: reason || "LLM semantic follow-up resolver decision.",
+      contextMessageIndex:
+        typeof json.contextMessageIndex === "number"
+          ? json.contextMessageIndex
+          : null,
+    };
+  } catch {
+    return null;
   }
-
-  return "";
 }
 
-function getPreviousAssistant(messages: ChatMessageLike[]) {
-  const assistantMessages = usableMessages(messages).filter(
-    (message) => message.role === "assistant"
-  );
-
-  return assistantMessages[assistantMessages.length - 1] || null;
-}
-
-function hasExplicitStandaloneIntent(question: string) {
-  const text = normalizePharmaText(question);
-
-  const explicitTerms = [
-    "cms",
-    "medicare",
-    "part d",
-    "spending",
-    "spend",
-    "spent",
-    "trend",
-    "trends",
-    "cost",
-    "costs",
-    "prescriber",
-    "provider",
-    "specialty",
-    "state",
-    "open payments",
-    "payment",
-    "sales quantity",
-    "fda",
-    "label",
-    "warning",
-    "warnings",
-    "used for",
-    "adverse",
-    "dosage",
-    "contraindication",
-  ];
-
-  return explicitTerms.some((term) => text.includes(normalizePharmaText(term)));
-}
-
-function isOverallFollowUp(question: string) {
-  const text = normalizePharmaText(question);
-  return ["overall", "overall view", "overall trend", "overall trends", "overall summary"].includes(text);
-}
-
-function isWhatAboutFollowUp(question: string) {
-  const text = normalizePharmaText(question);
-
-  return (
-    text.startsWith("what about ") ||
-    text.startsWith("how about ") ||
-    text.startsWith("same for ") ||
-    text.startsWith("and ") ||
-    text.startsWith("also ")
-  );
-}
-
-function isShortFollowUp(question: string) {
-  const text = normalizePharmaText(question);
-  const words = text.split(" ").filter(Boolean);
-
-  if (isOverallFollowUp(question) || isWhatAboutFollowUp(question)) return true;
-
-  if (words.length <= 4 && Boolean(resolveDrugEntity(question))) return true;
-
-  return false;
-}
-
-function previousTopic(previousUserQuestion: string, previousAssistant: ChatMessageLike | null) {
-  const previousText = normalizePharmaText(previousUserQuestion);
-  const route = getMetadataString(previousAssistant?.metadata, "route");
-  const toolName =
-    getMetadataString(previousAssistant?.metadata, "toolName") ||
-    getMetadataString(previousAssistant?.metadata, "agent");
-
-  if (
-    containsAnyNormalized(previousText, ["prescriber", "provider", "where", "state", "city", "location", "specialty"]) ||
-    toolName === "part_d_prescriber_agent"
-  ) {
-    return "prescriber";
-  }
-
-  if (
-    containsAnyNormalized(previousText, ["open payments", "payment", "physician payment"]) ||
-    toolName === "open_payments_agent"
-  ) {
-    return "open_payments";
-  }
-
-  if (
-    containsAnyNormalized(previousText, ["sales quantity", "quantity sold", "atc", "units sold"]) ||
-    toolName === "pharma_sales_agent"
-  ) {
-    return "pharma_sales";
-  }
-
-  if (
-    containsAnyNormalized(previousText, ["fda", "label", "warning", "used for", "adverse", "dosage", "contraindication"]) ||
-    route === "RAG_ONLY" ||
-    toolName === "openfda_label_agent"
-  ) {
-    return "label";
-  }
-
-  if (
-    containsAnyNormalized(previousText, ["spending", "spend", "spent", "cost", "trend", "trends", "top", "highest", "expensive", "medicare", "part d", "cms"]) ||
-    toolName === "part_d_drug_trend_agent" ||
-    toolName === "part_d_top_spending_agent" ||
-    toolName === "part_d_spending_increase_agent"
-  ) {
-    return "spending";
-  }
-
-  return "unknown";
-}
-
-function stripFollowUpPrefix(question: string) {
-  return clean(question)
-    .replace(/^what about\s+/i, "")
-    .replace(/^how about\s+/i, "")
-    .replace(/^same for\s+/i, "")
-    .replace(/^and\s+/i, "")
-    .replace(/^also\s+/i, "")
-    .replace(/[?]+$/g, "")
-    .trim();
-}
-
-function rewriteWithTopic({
+function buildPrompt({
   question,
-  topic,
+  conversation,
 }: {
   question: string;
-  topic: string;
+  conversation: ReturnType<typeof recentConversationForPrompt>;
 }) {
-  const drug = resolveDrugEntity(question);
-  const followUpSubject = stripFollowUpPrefix(question);
-  const subject = drug?.canonical || followUpSubject;
+  return [
+    "You are a conversation context resolver for PharmaRev AI.",
+    "",
+    "Your only job is to decide whether the current user question is a follow-up to the previous conversation.",
+    "If it is a follow-up, rewrite it into a complete standalone question that preserves the user's intent.",
+    "If it is not a follow-up, return the original question unchanged.",
+    "",
+    "Important rules:",
+    "- Do not answer the question.",
+    "- Do not add facts that are not in the conversation.",
+    "- Do not invent drug names, years, datasets, or metrics.",
+    "- If the user asks for a temporal continuation like trends, history, or over-time comparison, resolve it against the prior topic.",
+    "- If the current question is standalone, mark isFollowUp as false.",
+    "- Keep the resolved question concise and suitable for routing to SQL/RAG agents.",
+    "",
+    "Return only valid JSON with this exact shape:",
+    JSON.stringify({
+      isFollowUp: true,
+      resolvedQuestion: "standalone resolved question here",
+      reason: "short reason",
+      contextMessageIndex: 0,
+    }),
+    "",
+    "Recent conversation messages:",
+    JSON.stringify(conversation, null, 2),
+    "",
+    "Current user question:",
+    question,
+  ].join("\n");
+}
 
-  if (isOverallFollowUp(question)) {
-    if (topic === "prescriber") {
-      return "Show overall CMS Part D prescriber cost locations in 2024.";
+async function askGeminiFollowUpResolver({
+  question,
+  messages,
+}: {
+  question: string;
+  messages: ChatMessageLike[];
+}): Promise<LlmFollowUpDecision | null> {
+  const apiKey = getGeminiKey();
+
+  if (!apiKey) {
+    return null;
+  }
+
+  const conversation = recentConversationForPrompt(messages);
+
+  if (conversation.length === 0) {
+    return null;
+  }
+
+  const model = getModelName();
+  const prompt = buildPrompt({ question, conversation });
+
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
+      model
+    )}:generateContent?key=${encodeURIComponent(apiKey)}`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        contents: [
+          {
+            role: "user",
+            parts: [{ text: prompt }],
+          },
+        ],
+        generationConfig: {
+          temperature: 0,
+          maxOutputTokens: 300,
+          responseMimeType: "application/json",
+        },
+      }),
     }
+  );
 
-    if (topic === "open_payments") {
-      return "Show overall CMS Open Payments totals from the loaded public data.";
-    }
-
-    if (topic === "pharma_sales") {
-      return "Show overall public pharma sales quantity trends from the loaded data.";
-    }
-
-    if (topic === "label") {
-      return "Ask me which drug you want FDA label context for, such as use, warnings, adverse reactions, dosage, or contraindications.";
-    }
-
-    return "Show overall CMS Medicare Part D spending trends in 2024.";
+  if (!response.ok) {
+    return null;
   }
 
-  if (!subject) {
-    return question;
+  const data = (await response.json()) as GeminiResponse;
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+
+  if (!text) {
+    return null;
   }
 
-  if (topic === "prescriber") {
-    return `For ${subject}, where were CMS Part D prescriber costs highest in 2024?`;
+  return parseLlmDecision(text);
+}
+
+function fallbackNoLlmResolution(question: string): ConversationContextResult {
+  return {
+    resolvedQuestion: question,
+    wasFollowUp: false,
+    method: "no_llm_context_resolution",
+    reason:
+      "LLM context resolver was unavailable, so the question was treated as standalone.",
+  };
+}
+
+function getContextSourceFromDecision({
+  decision,
+  messages,
+}: {
+  decision: LlmFollowUpDecision;
+  messages: ChatMessageLike[];
+}): ConversationContextResult["contextSource"] {
+  if (
+    typeof decision.contextMessageIndex !== "number" ||
+    decision.contextMessageIndex < 0
+  ) {
+    return undefined;
   }
 
-  if (topic === "open_payments") {
-    return `Show public CMS Open Payments information involving ${subject}.`;
+  const conversation = recentConversationForPrompt(messages);
+  const selected = conversation[decision.contextMessageIndex];
+
+  if (!selected) {
+    return undefined;
   }
 
-  if (topic === "pharma_sales") {
-    return `Show public pharma sales quantity trends for ${subject}.`;
-  }
-
-  if (topic === "label") {
-    return `What does the loaded FDA label evidence say about ${subject}?`;
-  }
-
-  if (topic === "spending") {
-    return `Show CMS Medicare Part D spending trend for ${subject}.`;
-  }
-
-  return question;
+  return {
+    messageId: selected.id ?? undefined,
+    role: selected.role,
+    content: selected.resolvedQuestion || selected.content,
+  };
 }
 
 export async function resolveConversationQuestion({
@@ -259,79 +269,51 @@ export async function resolveConversationQuestion({
 }: {
   question: string;
   messages: ChatMessageLike[];
-}): Promise<ConversationResolution> {
-  const originalQuestion = clean(question);
+}): Promise<ConversationContextResult> {
+  const cleanedQuestion = clean(question);
 
-  if (!originalQuestion) {
+  if (!cleanedQuestion) {
     return {
-      originalQuestion,
-      resolvedQuestion: originalQuestion,
+      resolvedQuestion: "",
       wasFollowUp: false,
-      method: "none",
-      reason: "Empty question.",
+      method: "empty_question",
+      reason: "Question was empty.",
     };
   }
 
-  if (hasExplicitStandaloneIntent(originalQuestion) && !isOverallFollowUp(originalQuestion)) {
+  if (!messages || messages.length === 0) {
     return {
-      originalQuestion,
-      resolvedQuestion: originalQuestion,
+      resolvedQuestion: cleanedQuestion,
       wasFollowUp: false,
-      method: "none",
-      reason: "Question already contains an explicit standalone dataset or metric intent.",
+      method: "no_context",
+      reason: "No previous conversation was available.",
     };
   }
 
-  if (!isShortFollowUp(originalQuestion)) {
+  try {
+    const decision = await askGeminiFollowUpResolver({
+      question: cleanedQuestion,
+      messages,
+    });
+
+    if (!decision) {
+      return fallbackNoLlmResolution(cleanedQuestion);
+    }
+
     return {
-      originalQuestion,
-      resolvedQuestion: originalQuestion,
-      wasFollowUp: false,
-      method: "none",
-      reason: "Question is not a short follow-up.",
+      resolvedQuestion: decision.resolvedQuestion,
+      wasFollowUp: decision.isFollowUp,
+      method: decision.isFollowUp
+        ? "llm_semantic_followup_resolution"
+        : "llm_semantic_standalone_resolution",
+      reason: decision.reason,
+      contextSource: decision.isFollowUp
+        ? getContextSourceFromDecision({ decision, messages })
+        : undefined,
     };
+  } catch {
+    return fallbackNoLlmResolution(cleanedQuestion);
   }
-
-  const previousUserQuestion = getPreviousUserQuestion({
-    messages,
-    currentQuestion: originalQuestion,
-  });
-  const previousAssistant = getPreviousAssistant(messages);
-  const topic = previousTopic(previousUserQuestion, previousAssistant);
-  const resolvedQuestion = rewriteWithTopic({
-    question: originalQuestion,
-    topic,
-  });
-
-  if (normalizePharmaText(resolvedQuestion) === normalizePharmaText(originalQuestion)) {
-    return {
-      originalQuestion,
-      resolvedQuestion: originalQuestion,
-      wasFollowUp: false,
-      method: "none",
-      reason: "No useful previous topic was found for rewriting.",
-      contextSource: {
-        previousUserQuestion,
-        previousAssistantRoute: getMetadataString(previousAssistant?.metadata, "route"),
-        previousAssistantToolName:
-          getMetadataString(previousAssistant?.metadata, "toolName") ||
-          getMetadataString(previousAssistant?.metadata, "agent"),
-      },
-    };
-  }
-
-  return {
-    originalQuestion,
-    resolvedQuestion,
-    wasFollowUp: true,
-    method: "deterministic_context_rewrite",
-    reason: `Short follow-up resolved using previous ${topic} topic.`,
-    contextSource: {
-      previousUserQuestion,
-      previousAssistantRoute: getMetadataString(previousAssistant?.metadata, "route"),
-      previousAssistantToolName:
-        getMetadataString(previousAssistant?.metadata, "toolName") ||
-        getMetadataString(previousAssistant?.metadata, "agent"),
-    },
-  };
 }
+
+export default resolveConversationQuestion;
