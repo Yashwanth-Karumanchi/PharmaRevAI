@@ -13,14 +13,6 @@ import {
   markdownTable,
   normalizeText,
 } from "@/lib/agents/pharmaEntityResolver";
-import { extractRequestedLimitFromQuestions } from "./partDQuestionParser";
-
-const limit = extractRequestedLimitFromQuestions({
-  originalQuestion: extractedEntities?.originalQuestion,
-  resolvedQuestion: question,
-  defaultLimit: 10,
-  maxLimit: 25,
-});
 
 type LatestYearRow = { program_year: number | null };
 
@@ -183,7 +175,7 @@ async function getPaymentRows({
         and physician_specialty is not null
       group by physician_specialty
       order by sum(payment_amount) desc nulls last
-      limit ${limit}
+      limit 10
     `;
   }
 
@@ -199,7 +191,7 @@ async function getPaymentRows({
         and recipient_state is not null
       group by recipient_state
       order by sum(payment_amount) desc nulls last
-      limit ${limit}
+      limit 10
     `;
   }
 
@@ -216,7 +208,7 @@ async function getPaymentRows({
         and drug_or_device_name <> ''
       group by drug_or_device_name
       order by sum(payment_amount) desc nulls last
-      limit ${limit}
+      limit 10
     `;
   }
 
@@ -231,7 +223,7 @@ async function getPaymentRows({
       and company_name is not null
     group by company_name
     order by sum(payment_amount) desc nulls last
-    limit ${limit}
+    limit 10
   `;
 }
 
@@ -322,8 +314,8 @@ export async function answerOpenPaymentsQuestion(question: string) {
     : buildNoRowsAnswer({ year: latestYear, entity, analysisType });
 
   const sqlQuery = entity
-    ? `Grouped open_payments by ${analysisType} for program_year=${latestYear}; applied ${entity.kind} filter '${entity.value}'; ordered by sum(payment_amount) DESC; limit ${limit}.`
-    : `Grouped open_payments by ${analysisType} for program_year=${latestYear}; ordered by sum(payment_amount) DESC; limit ${limit}.`;
+    ? `Grouped open_payments by ${analysisType} for program_year=${latestYear}; applied ${entity.kind} filter '${entity.value}'; ordered by sum(payment_amount) DESC; limit 10.`
+    : `Grouped open_payments by ${analysisType} for program_year=${latestYear}; ordered by sum(payment_amount) DESC; limit 10.`;
 
   const composed = await composePharmaAnswer({
     question,
