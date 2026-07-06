@@ -16,6 +16,14 @@ import {
   normalizeText,
   resolveKnownDrug,
 } from "@/lib/agents/pharmaEntityResolver";
+import { extractRequestedLimitFromQuestions } from "./partDQuestionParser";
+
+const limit = extractRequestedLimitFromQuestions({
+  originalQuestion: extractedEntities?.originalQuestion,
+  resolvedQuestion: question,
+  defaultLimit: 10,
+  maxLimit: 25,
+});
 
 type LatestYearRow = { year: number | null };
 
@@ -221,7 +229,7 @@ async function getTopLocations({
       )
     group by provider_state, provider_city
     order by sum(total_drug_cost) desc nulls last
-    limit 10
+    limit ${limit}
   `;
 }
 
@@ -252,7 +260,7 @@ async function getTopStates({
       )
     group by provider_state
     order by sum(total_drug_cost) desc nulls last
-    limit 10
+    limit ${limit}
   `;
 }
 
@@ -283,7 +291,7 @@ async function getTopSpecialties({
       )
     group by provider_specialty
     order by sum(total_drug_cost) desc nulls last
-    limit 10
+    limit ${limit}
   `;
 }
 
@@ -316,7 +324,7 @@ async function getTopProviders({
       )
     group by npi, provider_name, provider_city, provider_state, provider_specialty
     order by sum(total_drug_cost) desc nulls last
-    limit 10
+    limit ${limit}
   `;
 }
 
@@ -337,7 +345,7 @@ async function getGlobalTopProviders(year: number) {
     where year = ${year}
     group by npi, provider_name, provider_city, provider_state, provider_specialty
     order by sum(total_drug_cost) desc nulls last
-    limit 10
+    limit ${limit}
   `;
 }
 
@@ -530,8 +538,8 @@ export async function answerPartDPrescriberQuestion(question: string) {
         : buildNoRowsAnswer({ year: latestYear, displayName, analysisType });
 
     sqlQuery = isDrugSpecific
-      ? `Grouped cms_part_d_prescribers by provider_city/provider_state for ${displayName} in ${latestYear}; WHERE brand_name/generic_name ILIKE resolved aliases; ORDER BY sum(total_drug_cost) DESC; LIMIT 10.`
-      : `Grouped cms_part_d_prescribers by provider_city/provider_state in ${latestYear}; ORDER BY sum(total_drug_cost) DESC; LIMIT 10.`;
+      ? `Grouped cms_part_d_prescribers by provider_city/provider_state for ${displayName} in ${latestYear}; WHERE brand_name/generic_name ILIKE resolved aliases; ORDER BY sum(total_drug_cost) DESC; LIMIT ${limit}.`
+      : `Grouped cms_part_d_prescribers by provider_city/provider_state in ${latestYear}; ORDER BY sum(total_drug_cost) DESC; LIMIT ${limit}.`;
   } else if (analysisType === "state") {
     rows = isDrugSpecific
       ? await getTopStates({ year: latestYear, patterns })
@@ -547,8 +555,8 @@ export async function answerPartDPrescriberQuestion(question: string) {
         : buildNoRowsAnswer({ year: latestYear, displayName, analysisType });
 
     sqlQuery = isDrugSpecific
-      ? `Grouped cms_part_d_prescribers by provider_state for ${displayName} in ${latestYear}; WHERE brand_name/generic_name ILIKE resolved aliases; ORDER BY sum(total_drug_cost) DESC; LIMIT 10.`
-      : `Grouped cms_part_d_prescribers by provider_state in ${latestYear}; ORDER BY sum(total_drug_cost) DESC; LIMIT 10.`;
+      ? `Grouped cms_part_d_prescribers by provider_state for ${displayName} in ${latestYear}; WHERE brand_name/generic_name ILIKE resolved aliases; ORDER BY sum(total_drug_cost) DESC; LIMIT ${limit}.`
+      : `Grouped cms_part_d_prescribers by provider_state in ${latestYear}; ORDER BY sum(total_drug_cost) DESC; LIMIT ${limit}.`;
   } else if (analysisType === "specialty") {
     rows = isDrugSpecific
       ? await getTopSpecialties({ year: latestYear, patterns })
@@ -564,8 +572,8 @@ export async function answerPartDPrescriberQuestion(question: string) {
         : buildNoRowsAnswer({ year: latestYear, displayName, analysisType });
 
     sqlQuery = isDrugSpecific
-      ? `Grouped cms_part_d_prescribers by provider_specialty for ${displayName} in ${latestYear}; WHERE brand_name/generic_name ILIKE resolved aliases; ORDER BY sum(total_drug_cost) DESC; LIMIT 10.`
-      : `Grouped cms_part_d_prescribers by provider_specialty in ${latestYear}; ORDER BY sum(total_drug_cost) DESC; LIMIT 10.`;
+      ? `Grouped cms_part_d_prescribers by provider_specialty for ${displayName} in ${latestYear}; WHERE brand_name/generic_name ILIKE resolved aliases; ORDER BY sum(total_drug_cost) DESC; LIMIT ${limit}.`
+      : `Grouped cms_part_d_prescribers by provider_specialty in ${latestYear}; ORDER BY sum(total_drug_cost) DESC; LIMIT ${limit}.`;
   } else {
     rows = isDrugSpecific
       ? await getTopProviders({ year: latestYear, patterns })
@@ -581,8 +589,8 @@ export async function answerPartDPrescriberQuestion(question: string) {
         : buildNoRowsAnswer({ year: latestYear, displayName, analysisType });
 
     sqlQuery = isDrugSpecific
-      ? `Grouped cms_part_d_prescribers by NPI/provider for ${displayName} in ${latestYear}; WHERE brand_name/generic_name ILIKE resolved aliases; ORDER BY sum(total_drug_cost) DESC; LIMIT 10.`
-      : `Grouped cms_part_d_prescribers by NPI/provider in ${latestYear}; ORDER BY sum(total_drug_cost) DESC; LIMIT 10.`;
+      ? `Grouped cms_part_d_prescribers by NPI/provider for ${displayName} in ${latestYear}; WHERE brand_name/generic_name ILIKE resolved aliases; ORDER BY sum(total_drug_cost) DESC; LIMIT ${limit}.`
+      : `Grouped cms_part_d_prescribers by NPI/provider in ${latestYear}; ORDER BY sum(total_drug_cost) DESC; LIMIT ${limit}.`;
   }
 
   const composed = await composePharmaAnswer({

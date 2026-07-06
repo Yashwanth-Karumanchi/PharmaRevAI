@@ -6,6 +6,14 @@ import {
   containsAnyNormalized,
   type ResolvedDrugEntity,
 } from "./pharmaEntityResolver";
+import { extractRequestedLimitFromQuestions } from "./partDQuestionParser";
+
+const limit = extractRequestedLimitFromQuestions({
+  originalQuestion: extractedEntities?.originalQuestion,
+  resolvedQuestion: question,
+  defaultLimit: 10,
+  maxLimit: 25,
+});
 
 type SpendingAgentResult = {
   answer: string;
@@ -252,7 +260,7 @@ async function loadTopDrugsForYear(year: number) {
       and lower(coalesce(manufacturer, '')) <> 'overall'
     group by brand_name, generic_name, manufacturer
     order by sum(coalesce(total_spending, 0)) desc
-    limit 10
+    limit ${limit}
   `;
 }
 
@@ -418,7 +426,7 @@ export async function answerPartDTopSpendingQuestion(
       total_beneficiaries: toNumber(row.total_beneficiaries),
     })),
     sqlQuery:
-      "Grouped cms_part_d_spending by brand/generic/manufacturer for selected year, ordered by sum(total_spending) desc, limit 10.",
+      `Grouped cms_part_d_spending by brand/generic/manufacturer for selected year, ordered by sum(total_spending) desc, limit ${limit}.`,
     sources: withStandardSources(
       "CMS Part D highest spending drugs",
       `Top CMS Part D gross spending drugs in ${displayYear}.`
@@ -583,7 +591,7 @@ export async function answerPartDSpendingIncreaseQuestion(
     from pivoted
     where end_year_spending > start_year_spending
     order by end_year_spending - start_year_spending desc
-    limit 10
+    limit ${limit}
   `;
 
   const table = markdownTable(

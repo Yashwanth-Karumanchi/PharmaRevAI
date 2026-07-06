@@ -4,6 +4,7 @@ import {
   composePharmaAnswer,
 } from "@/lib/agents/llmComposer";
 import type { SourceEvidence } from "@/types/evidence";
+import { extractRequestedLimitFromQuestions } from "./partDQuestionParser";
 import {
   clean,
   commonLimitSource,
@@ -13,6 +14,13 @@ import {
   markdownTable,
   normalizeText,
 } from "@/lib/agents/pharmaEntityResolver";
+
+const limit = extractRequestedLimitFromQuestions({
+  originalQuestion: extractedEntities?.originalQuestion,
+  resolvedQuestion: question,
+  defaultLimit: 10,
+  maxLimit: 25,
+});
 
 type YearRangeRow = {
   min_year: number | null;
@@ -140,7 +148,7 @@ async function getSampleSuggestions() {
     where coalesce(drug_name, atc_category) is not null
       and upper(coalesce(atc_category, '')) not in ('YEAR', 'MONTH', 'HOUR', 'WEEKDAY')
     order by label asc
-    limit 10
+    limit ${limit}
   `;
 
   return rows
@@ -200,8 +208,7 @@ async function getTopVolumeRows(year: number | null) {
         and upper(coalesce(atc_category, '')) not in ('YEAR', 'MONTH', 'HOUR', 'WEEKDAY')
       group by coalesce(drug_name, atc_category, 'Unknown'), sale_year
       order by sum(quantity_sold) desc nulls last
-      limit 10
-    `;
+      limit ${limit}`;
   }
 
   return sql<SalesResultRow[]>`
@@ -217,7 +224,7 @@ async function getTopVolumeRows(year: number | null) {
       and upper(coalesce(atc_category, '')) not in ('YEAR', 'MONTH', 'HOUR', 'WEEKDAY')
     group by coalesce(drug_name, atc_category, 'Unknown')
     order by sum(quantity_sold) desc nulls last
-    limit 10
+    limit ${limit}
   `;
 }
 
@@ -259,7 +266,7 @@ async function getDropRows(minYear: number, maxYear: number) {
       percent_change::numeric::text as percent_change
     from paired
     order by quantity_change asc nulls last
-    limit 10
+    limit ${limit}
   `;
 }
 
@@ -508,7 +515,7 @@ export async function answerPharmaSalesQuestion(question: string) {
     rows = await getDropRows(minYear, maxYear);
     draftAnswer = rows.length > 0 ? buildDropAnswer({ minYear, maxYear, rows }) : buildNoRowsAnswer(detectedEntity);
     analysisType = "quantity_drop";
-    sqlQuery = `Compared sum(quantity_sold) by product/category between ${minYear} and ${maxYear}, excluded polluted categories, ordered by quantity_change ASC, limit 10.`;
+    sqlQuery = `Compared sum(quantity_sold) by product/category between ${minYear} and ${maxYear}, excluded polluted categories, ordered by quantity_change ASC, limit ${limit}.`;
   } else if (isForecastQuestion(question)) {
     rows = await getTrendRows(detectedEntity);
     draftAnswer = rows.length > 0 ? buildForecastAnswer({ entity: detectedEntity, rows }) : buildNoRowsAnswer(detectedEntity);
@@ -534,7 +541,7 @@ export async function answerPharmaSalesQuestion(question: string) {
     rows = await getTopVolumeRows(maxYear);
     draftAnswer = rows.length > 0 ? buildTopVolumeAnswer({ year: maxYear, rows }) : buildNoRowsAnswer(null);
     analysisType = "top_quantity";
-    sqlQuery = `Grouped pharma_sales by product/category for ${maxYear}, excluded polluted categories, ordered by sum(quantity_sold) DESC, limit 10.`;
+    sqlQuery = `Grouped pharma_sales by product/category for ${maxYear}, excluded polluted categories, ordered by sum(quantity_sold) DESC, limit ${limit}.`;
   }
 
   const composed = await composePharmaAnswer({
